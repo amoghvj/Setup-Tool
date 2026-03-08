@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Expo / Agent mobile app (separate repo)
+agent/
+
+# IDE
+.vscode/
+
+# PyInstaller
+*.manifest
+*.pem
