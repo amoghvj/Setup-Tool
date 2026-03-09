@@ -1,7 +1,17 @@
 const Agent = require('../models/Agent');
+const AgentLocation = require('../models/AgentLocation');
 const DeliveryAssignment = require('../models/DeliveryAssignment');
 const SystemState = require('../models/SystemState');
 const { calculateRoute, getNextPickupLocation } = require('./routingService');
+
+/**
+ * Helper: fetches the agent's current GPS from the AgentLocation collection.
+ * Returns { lat, lng } or null.
+ */
+async function getAgentCurrentLocation(agentId) {
+  const loc = await AgentLocation.findOne({ agentId });
+  return loc ? loc.location : null;
+}
 
 /**
  * Ensures the global First-Deliveries array is in sync with all active agents.
@@ -51,9 +61,16 @@ async function assignDriver(agentId, orderId, coords) {
 
   // Append directly to pending queue (no routing computation needed yet)
   agent.pendingPickupDeliveries.push(newDeliveryId);
-  await agent.save();
 
-  // No active queue change, so no syncGlobalFirstDeliveries needed here
+  // Update nextPickupLocation so the driver knows where to go
+  const populatedAgent = await Agent.findOne({ agentId }).populate('activeDeliveries');
+  const currentLoc = await getAgentCurrentLocation(agentId);
+  agent.nextPickupLocation = await getNextPickupLocation(
+    populatedAgent.activeDeliveries,
+    currentLoc
+  );
+
+  await agent.save();
   return agent;
 }
 
@@ -89,11 +106,21 @@ async function processPickup(agentId) {
   // Step 3 — Move Pending → Active
   const pendingIds = [...agent.pendingPickupDeliveries];
 
-  // Step 4 — Run Route Calculation
-  const optimizedRoute = calculateRoute(pendingIds);
+  // Step 4 — Run Route Calculation (TSP with first element fixed)
+  const optimizedRoute = await calculateRoute(pendingIds);
 
   // Step 5 — Determine Next Pickup Location
-  const nextPickup = getNextPickupLocation(agent.nextPickupLocation);
+  // Use the optimized route (the deliveries that will become active) for calculation
+  const populatedDeliveries = await DeliveryAssignment.find({ _id: { $in: optimizedRoute } });
+  // Reorder populated docs to match the optimized route order
+  const orderedPopulated = optimizedRoute.map(id =>
+    populatedDeliveries.find(d => d._id.equals(id))
+  ).filter(Boolean);
+  const currentLoc = await getAgentCurrentLocation(agentId);
+  const nextPickup = await getNextPickupLocation(
+    orderedPopulated,
+    currentLoc
+  );
 
   // Step 6 — Update Agent Record
   agent.activeDeliveries = optimizedRoute;
@@ -148,8 +175,37 @@ async function cancelDelivery(orderId) {
   } else if (inActive) {
     // Step 5 — Handle Active Delivery Cancellation (route recalc required)
     const remaining = agent.activeDeliveries.filter(id => !id.equals(deliveryId));
-    agent.activeDeliveries = calculateRoute(remaining);
-    agent.nextPickupLocation = getNextPickupLocation(agent.nextPickupLocation);
+
+    const isFirstCancelled = agent.activeDeliveries.length > 0 &&
+      agent.activeDeliveries[0].equals(deliveryId);
+
+    if (isFirstCancelled && remaining.length > 0) {
+      // Edge case: first delivery cancelled — driver may be in motion.
+      // Prepend driver's current location as a virtual fixed start node,
+      // run TSP, then strip the virtual node from the result.
+      const currentLoc = await getAgentCurrentLocation(agentId);
+
+      if (currentLoc) {
+        const virtualStart = { _virtualId: '__driver_location__', lat: currentLoc.lat, lng: currentLoc.lng };
+        const withVirtual = [virtualStart, ...remaining];
+        const optimized = await calculateRoute(withVirtual);
+        // Remove the virtual node (always first after TSP since it was fixed)
+        agent.activeDeliveries = optimized.filter(n => !n._virtualId);
+      } else {
+        // No location available — just re-optimize without virtual start
+        agent.activeDeliveries = await calculateRoute(remaining);
+      }
+    } else if (remaining.length > 0) {
+      // Non-first delivery cancelled — standard recalc with first element fixed
+      agent.activeDeliveries = await calculateRoute(remaining);
+    } else {
+      agent.activeDeliveries = [];
+    }
+
+    // Re-populate remaining active deliveries for nextPickupLocation calculation
+    const populatedRemaining = await DeliveryAssignment.find({ _id: { $in: agent.activeDeliveries } });
+    const nextLoc = await getAgentCurrentLocation(agentId);
+    agent.nextPickupLocation = await getNextPickupLocation(populatedRemaining, nextLoc);
   }
 
   await agent.save();
@@ -190,6 +246,8 @@ async function completeDelivery(agentId) {
 
   // Step 3 — Remove the first delivery (current delivery being fulfilled)
   const completedId = agent.activeDeliveries.shift();
+  // No re-optimization needed: TSP order is already optimal when following sequentially
+
   await agent.save();
 
   // Step 4 — Delete the DeliveryAssignment record
@@ -203,18 +261,24 @@ async function completeDelivery(agentId) {
 
 /**
  * Retrieves an agent's active delivery route and next pickup location.
+ * Populates activeDeliveries so each entry includes orderId and destination coordinates.
  *
  * @param {string} agentId - The agent identifier.
- * @returns {object} { activeDeliveries, nextPickupLocation }
+ * @returns {object} { activeDeliveries: [{ orderId, destination }], nextPickupLocation }
  */
 async function getAgentRoute(agentId) {
-  const agent = await Agent.findOne({ agentId });
+  const agent = await Agent.findOne({ agentId }).populate('activeDeliveries');
   if (!agent) {
     throw new Error(`Agent "${agentId}" not found.`);
   }
 
+  const deliveries = agent.activeDeliveries.map(d => ({
+    orderId: d.orderId || null,
+    destination: d.destination
+  }));
+
   return {
-    activeDeliveries: agent.activeDeliveries,
+    activeDeliveries: deliveries,
     nextPickupLocation: agent.nextPickupLocation
   };
 }

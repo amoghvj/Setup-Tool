@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -17,7 +18,22 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/optiro
 
 // ---------- Middleware ----------
 // Security headers (safe defaults for both local and cloud)
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: [
+        "'self'", 
+        "data:", 
+        "https://*.tile.openstreetmap.org", 
+        "https://images.unsplash.com"
+      ],
+      connectSrc: ["'self'"],
+    },
+  },
+}));
 
 // CORS — allows the mobile app and other clients to call this server
 app.use(cors());
@@ -41,15 +57,11 @@ const {
 // ---------- Models ----------
 const Agent = require('./models/Agent');
 const AgentLocation = require('./models/AgentLocation');
+const PickupLocation = require('./models/PickupLocation');
+const DeliveryAssignment = require('./models/DeliveryAssignment');
 
-// ---------- Routes ----------
-app.get('/', (_req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'OptiRoute Pro server is running.',
-    port: PORT
-  });
-});
+// Serve static files from the React frontend
+app.use(express.static(path.join(__dirname, 'frontend/dist')));
 
 // POST /api/agents/add — Register a new delivery agent (used by mobile app)
 app.post('/api/agents/add', async (req, res) => {
@@ -171,6 +183,98 @@ app.post('/api/deliveries/cancel', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ========== Pickup Location Endpoints ==========
+
+// POST /api/pickups/add — Add a new pickup location
+app.post('/api/pickups/add', async (req, res) => {
+  try {
+    const { id, name, coords } = req.body;
+    if (!id || !name || !coords || coords.lat == null || coords.lng == null) {
+      return res.status(400).json({ error: 'id, name, and coords { lat, lng } are required.' });
+    }
+
+    const existing = await PickupLocation.findOne({ pickupId: id });
+    if (existing) {
+      return res.status(409).json({ error: `Pickup location "${id}" already exists.` });
+    }
+
+    const pickup = new PickupLocation({
+      pickupId: id,
+      name,
+      location: { lat: coords.lat, lng: coords.lng }
+    });
+    await pickup.save();
+
+    res.json({ success: true, pickup });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/pickups/:id — Get a pickup location by external ID
+app.get('/api/pickups/:id', async (req, res) => {
+  try {
+    const pickup = await PickupLocation.findOne({ pickupId: req.params.id });
+    if (!pickup) {
+      return res.status(404).json({ error: `Pickup location "${req.params.id}" not found.` });
+    }
+    res.json({ success: true, pickup });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/pickups/:id — Delete a pickup location by external ID
+app.delete('/api/pickups/:id', async (req, res) => {
+  try {
+    const pickup = await PickupLocation.findOneAndDelete({ pickupId: req.params.id });
+    if (!pickup) {
+      return res.status(404).json({ error: `Pickup location "${req.params.id}" not found.` });
+    }
+    res.json({ success: true, deleted: pickup });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========== List Endpoints ==========
+
+// GET /api/pickups — List all registered pickup locations
+app.get('/api/pickups', async (_req, res) => {
+  try {
+    const pickups = await PickupLocation.find({});
+    res.json({ success: true, count: pickups.length, pickups });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/agents — List all registered agents
+app.get('/api/agents', async (_req, res) => {
+  try {
+    const agents = await Agent.find({});
+    res.json({ success: true, count: agents.length, agents });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/deliveries — List all delivery assignments
+app.get('/api/deliveries', async (_req, res) => {
+  try {
+    const deliveries = await DeliveryAssignment.find({});
+    res.json({ success: true, count: deliveries.length, deliveries });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SPA Fallback Route (catch-all for React Router)
+// This must be the last route registered.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend/dist', 'index.html'));
 });
 
 // ---------- Database Initialization ----------

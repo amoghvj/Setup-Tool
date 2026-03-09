@@ -17,9 +17,6 @@ Thumbs.db
 __pycache__/
 *.pyc
 
-# Expo / Agent mobile app (separate repo)
-agent/
-
 # IDE
 .vscode/
 
