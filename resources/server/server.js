@@ -279,6 +279,7 @@ app.get('/manager/*', (req, res) => {
   if (req.path.startsWith('/manager/assets/')) {
     return res.status(404).send('Asset not found');
   }
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'frontend/dist', 'index.html'));
 });
 
