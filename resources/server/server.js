@@ -272,8 +272,13 @@ app.get('/api/deliveries', async (_req, res) => {
 });
 
 // SPA Fallback Route (catch-all for React Router)
-// This must handle any route that starts with /manager/
+// This must handle any route that starts with /manager/ but NOT dashboard assets
 app.get('/manager/*', (req, res) => {
+  // If the request is for an asset but it wasn't found by express.static, 
+  // we should return a 404 instead of index.html to avoid MIME type errors.
+  if (req.path.startsWith('/manager/assets/')) {
+    return res.status(404).send('Asset not found');
+  }
   res.sendFile(path.join(__dirname, 'frontend/dist', 'index.html'));
 });
 
