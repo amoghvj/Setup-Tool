@@ -18,6 +18,12 @@ const deliveryAssignmentSchema = new mongoose.Schema({
   destination: {
     lat: { type: Number, required: true },
     lng: { type: Number, required: true }
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'assigned', 'in-progress', 'completed', 'cancelled'],
+    default: 'pending',
+    index: true
   }
 }, { timestamps: true });
 

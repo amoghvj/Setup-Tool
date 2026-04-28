@@ -16,19 +16,52 @@ export function DeliveryManagement() {
     }
   }, [liveDeliveries]);
 
-  const handleAssignDriver = (deliveryId: string, driverId: string) => {
-    setDeliveries((prev: any[]) =>
-      prev.map((delivery: any) =>
-        delivery.id === deliveryId
-          ? { ...delivery, status: 'assigned' as const, assignedDriver: driverId }
-          : delivery
-      )
-    );
+  const handleAssignDriver = async (deliveryId: string, driverId: string) => {
+    try {
+      const response = await fetch('/api/deliveries/assign', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ delivery_id: deliveryId, agent_id: driverId })
+      });
 
-    const driver = liveDrivers.find(d => d.id === driverId);
-    const delivery = deliveries.find(d => d.id === deliveryId);
-    
-    toast.success(`Driver ${driver?.name} assigned to order ${delivery?.orderId}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Failed to assign delivery.');
+      }
+
+      const driver = liveDrivers.find(d => d.id === driverId);
+      const delivery = deliveries.find(d => d.id === deliveryId);
+
+      setDeliveries((prev: any[]) =>
+        prev.map((item: any) =>
+          item.id === deliveryId
+            ? { ...item, status: 'assigned' as const, assignedDriver: driverId }
+            : item
+        )
+      );
+
+      if (payload.delivery) {
+        setDeliveries((prev: any[]) =>
+          prev.map((item: any) =>
+            item.id === deliveryId
+              ? {
+                  ...item,
+                  id: payload.delivery._id?.toString?.() || payload.delivery._id || item.id,
+                  status: payload.delivery.status || 'assigned',
+                  assignedDriver: payload.delivery.agentId || driverId
+                }
+              : item
+          )
+        );
+      }
+
+      toast.success(`Driver ${driver?.name} assigned to order ${delivery?.orderId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to assign driver.';
+      toast.error(message);
+    }
   };
 
   const filteredDeliveries = filter === 'all'

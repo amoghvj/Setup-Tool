@@ -139,9 +139,9 @@ export function MapWidget({ drivers, deliveries, height = '600px', forceActiveDr
 
     // Add route paths for active deliveries
     drivers
-      .filter(d => d.status === 'delivering' && d.currentDelivery)
+      .filter(d => d.currentDelivery)
       .forEach(driver => {
-        const delivery = deliveries.find(del => del.orderId === driver.currentDelivery);
+        const delivery = deliveries.find(del => del.id === driver.currentDelivery);
         if (!delivery) return;
 
         const route = L.polyline(
@@ -178,10 +178,10 @@ export function MapWidget({ drivers, deliveries, height = '600px', forceActiveDr
 
           // Update route if exists
           const routeIndex = drivers
-            .slice(0, index)
-            .filter(d => d.status === 'delivering' && d.currentDelivery).length;
+              .slice(0, index)
+              .filter(d => d.currentDelivery).length;
           if (markersRef.current.routes[routeIndex]) {
-            const delivery = deliveries.find(del => del.orderId === driver.currentDelivery);
+              const delivery = deliveries.find(del => del.id === driver.currentDelivery);
             if (delivery) {
               markersRef.current.routes[routeIndex].setLatLngs([
                 newLatLng,

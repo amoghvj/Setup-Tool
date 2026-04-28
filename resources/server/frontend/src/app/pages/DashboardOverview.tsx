@@ -56,7 +56,7 @@ export function DashboardOverview() {
       .catch(err => console.error('Failed to fetch agents:', err));
   }, []);
   
-  const activeDrivers = drivers.filter(d => d.status === 'delivering');
+  const activeDrivers = drivers.filter(d => Boolean(d.currentDelivery));
   const activeDelivery = deliveries.find(d => d.status === 'in-progress' && d.timeline);
 
   // All drivers and deliveries from the hook are now displayed on the map

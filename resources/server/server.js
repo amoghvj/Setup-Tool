@@ -51,6 +51,7 @@ const {
   processPickup,
   completeDelivery,
   cancelDelivery,
+  assignExistingDelivery,
   getAgentRoute
 } = require('./services/deliveryService');
 
@@ -135,6 +136,21 @@ app.post('/api/deliveries/add', async (req, res) => {
     const agent = await assignDriver(agentId, order_id, coords);
 
     res.json({ success: true, agentId, agent });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/deliveries/assign — Persist a dashboard assignment to a specific driver
+app.post('/api/deliveries/assign', async (req, res) => {
+  try {
+    const { delivery_id, agent_id } = req.body;
+    if (!delivery_id || !agent_id) {
+      return res.status(400).json({ error: 'delivery_id and agent_id are required.' });
+    }
+
+    const result = await assignExistingDelivery(delivery_id, agent_id);
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -300,8 +316,17 @@ if (MONGODB_URI) {
 // ---------- Start ----------
 // Only listen when run directly (not when imported by Vercel serverless)
 if (require.main === module) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Server listening on http://localhost:${PORT}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${PORT} is already in use. Another server is already running.`);
+      process.exit(1);
+    }
+
+    throw err;
   });
 }
 

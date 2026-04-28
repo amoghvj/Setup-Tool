@@ -1,10 +1,11 @@
 interface StatusBadgeProps {
-  status: 'available' | 'delivering' | 'offline' | 'pending' | 'assigned' | 'in-progress' | 'completed' | 'delayed' | 'low' | 'medium' | 'high';
+  status: 'available' | 'unavailable' | 'delivering' | 'offline' | 'pending' | 'assigned' | 'in-progress' | 'completed' | 'delayed' | 'low' | 'medium' | 'high';
 }
 
 const statusConfig = {
   // Driver statuses
   available: { label: 'Available', className: 'bg-green-100 text-green-700 border-green-200' },
+  unavailable: { label: 'Unavailable', className: 'bg-gray-100 text-gray-700 border-gray-200' },
   delivering: { label: 'Delivering', className: 'bg-blue-100 text-blue-700 border-blue-200' },
   offline: { label: 'Offline', className: 'bg-gray-100 text-gray-700 border-gray-200' },
   

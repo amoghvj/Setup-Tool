@@ -2,7 +2,7 @@ export interface Driver {
   id: string;
   name: string;
   avatar: string;
-  status: 'available' | 'delivering' | 'offline';
+  status: 'available' | 'unavailable' | 'delivering' | 'offline';
   location: string;
   currentDelivery?: string;
   eta?: string;
