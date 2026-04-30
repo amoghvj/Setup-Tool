@@ -1,5 +1,4 @@
-
-  <!DOCTYPE html>
+<!DOCTYPE html>
   <html lang="en">
     <head>
       <meta charset="UTF-8" />
@@ -7,10 +6,182 @@
       <title>Logistics Management Dashboard UI</title>
       <script type="module" crossorigin src="/manager/assets/index-CDIvzfuw.js"></script>
       <link rel="stylesheet" crossorigin href="/manager/assets/index-DB6mmrge.css">
+      <link rel="stylesheet" href="/manager/override.css?v=3">
+      <script>
+        (function () {
+          function updateRouteClass() {
+            if (!document.body) return;
+            var isTracking = window.location.pathname.indexOf('/tracking') !== -1;
+            document.body.classList.toggle('route-tracking', isTracking);
+          }
+
+          function init() {
+            var pushState = history.pushState;
+            var replaceState = history.replaceState;
+
+            history.pushState = function () {
+              pushState.apply(history, arguments);
+              updateRouteClass();
+            };
+
+            history.replaceState = function () {
+              replaceState.apply(history, arguments);
+              updateRouteClass();
+            };
+
+            window.addEventListener('popstate', updateRouteClass);
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', updateRouteClass);
+            } else {
+              updateRouteClass();
+            }
+          }
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+          } else {
+            init();
+          }
+        })();
+      </script>
     </head>
 
     <body>
-      <div id="root"></div>
+      <div id="root"></div>
+      <script>
+        (function () {
+          var initialized = false;
+
+          function enableDeliveryKpi3D() {
+            if (initialized) return true;
+            try {
+              var heading = Array.from(document.querySelectorAll('h1')).find(function (h) {
+                return /Delivery\s+Management/i.test(h.textContent || '');
+              });
+              if (!heading) return false;
+
+              var container = heading.closest('main') || document;
+              var cards = container.querySelectorAll('.grid.grid-cols-1.gap-4 > div');
+              if (!cards || !cards.length) return false;
+
+              // mark container for perspective
+              var wrap = document.createElement('div');
+              wrap.className = 'delivery-kpis';
+              var firstCard = cards[0];
+              firstCard.parentNode.insertBefore(wrap, firstCard);
+              cards.forEach(function (card) {
+                wrap.appendChild(card);
+                card.classList.add('kpi-3d');
+                card.setAttribute('tabindex', '0');
+
+                // wrap inner content for pop-out if not already marked
+                var inner = card.querySelector('.kpi-inner');
+                if (!inner) {
+                  inner = document.createElement('div');
+                  inner.className = 'kpi-inner';
+                  while (card.firstChild) inner.appendChild(card.firstChild);
+                  card.appendChild(inner);
+                }
+
+                // mark potential icon and value elements
+                var icon = inner.querySelector('svg, img, .icon, .kpi-icon');
+                if (icon) icon.classList.add('kpi-icon', 'pop-out');
+                // heuristics to find a large numeric element
+                var value = inner.querySelector('h1, h2, .text-2xl, .text-3xl, .kpi-value');
+                if (value) value.classList.add('kpi-value', 'pop-out');
+                // title
+                var title = inner.querySelector('h3, h4, .text-sm, .kpi-title');
+                if (title) title.classList.add('kpi-title');
+
+                var raf = null;
+                var lastTransform = '';
+
+                function applyTransform(rotX, rotY) {
+                  var t = 'perspective(900px) rotateX(' + rotX + 'deg) rotateY(' + rotY + 'deg)';
+                  if (t === lastTransform) return;
+                  lastTransform = t;
+                  card.style.transform = t;
+                }
+
+                function onMove(e) {
+                  if (raf) cancelAnimationFrame(raf);
+                  raf = requestAnimationFrame(function () {
+                    var rect = card.getBoundingClientRect();
+                    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    var x = (clientX - rect.left) / rect.width;
+                    var y = (clientY - rect.top) / rect.height;
+                    var rotY = (x - 0.5) * 16; // degrees
+                    var rotX = (0.5 - y) * 12;
+                    applyTransform(rotX, rotY);
+                  });
+                }
+
+                function onLeave() {
+                  if (raf) cancelAnimationFrame(raf);
+                  applyTransform(0, 0);
+                }
+
+                function onFocus() {
+                  card.classList.add('focused-3d');
+                }
+
+                function onBlur() {
+                  card.classList.remove('focused-3d');
+                  applyTransform(0,0);
+                }
+
+                function onKey(e) {
+                  var step = 4;
+                  if (e.key === 'ArrowLeft') applyTransform(0, -step);
+                  if (e.key === 'ArrowRight') applyTransform(0, step);
+                  if (e.key === 'ArrowUp') applyTransform(-step, 0);
+                  if (e.key === 'ArrowDown') applyTransform(step, 0);
+                  if (e.key === 'Enter' || e.key === ' ') card.click();
+                }
+
+                card.addEventListener('mousemove', onMove);
+                card.addEventListener('touchmove', onMove, {passive:true});
+                card.addEventListener('mouseleave', onLeave);
+                card.addEventListener('touchend', onLeave);
+                card.addEventListener('focus', onFocus);
+                card.addEventListener('blur', onBlur);
+                card.addEventListener('keydown', onKey);
+              });
+
+              initialized = true;
+              return true;
+            } catch (err) {
+              console.warn('3D KPI init failed', err);
+              return false;
+            }
+          }
+
+          function bootWithRetry() {
+            if (enableDeliveryKpi3D()) return;
+
+            var attempts = 0;
+            var observer = new MutationObserver(function () {
+              attempts += 1;
+              if (enableDeliveryKpi3D() || attempts > 40) {
+                observer.disconnect();
+              }
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+            setTimeout(function () {
+              observer.disconnect();
+              enableDeliveryKpi3D();
+            }, 4000);
+          }
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', bootWithRetry);
+          } else {
+            bootWithRetry();
+          }
+        })();
+      </script>
+
     </body>
   </html>
-  
