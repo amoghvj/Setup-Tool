@@ -46,12 +46,11 @@ async function assignDriver(agentId, orderId, coords) {
   const delivery = new DeliveryAssignment({
     agentId,
     orderId,
-    destination: { lat: coords.lat, lng: coords.lng },
-    status: 'assigned'
+    destination: { lat: coords.lat, lng: coords.lng }
   });
 
   await delivery.save();
-  await queueDeliveryToAgent(agentId, delivery._id, { status: 'assigned' });
+  await queueDeliveryToAgent(agentId, delivery._id);
 
   const updatedAgent = await Agent.findOne({ agentId }).populate('activeDeliveries');
   const currentLocation = await getAgentCurrentLocation(agentId);
@@ -84,12 +83,6 @@ async function processPickup(agentId) {
     const orderedPending = orderDocsByIds(pendingIds, pendingDocs);
     const optimizedRoute = await calculateRoute(orderedPending);
     const optimizedIds = optimizedRoute.map(delivery => delivery._id);
-
-    await DeliveryAssignment.updateMany(
-      { _id: { $in: optimizedIds } },
-      { $set: { status: 'in-progress' } },
-      { session }
-    );
 
     agent.activeDeliveries = optimizedIds;
     agent.pendingPickupDeliveries = [];
@@ -219,8 +212,7 @@ async function getAgentRoute(agentId) {
   const deliveries = agent.activeDeliveries.map(delivery => ({
     id: delivery._id.toString(),
     orderId: delivery.orderId || null,
-    destination: delivery.destination,
-    status: delivery.status || 'in-progress'
+    destination: delivery.destination
   }));
 
   return {
@@ -235,7 +227,7 @@ async function assignExistingDelivery(deliveryId, agentId) {
     throw new Error(`Delivery "${deliveryId}" not found.`);
   }
 
-  return moveDeliveryToAgent(deliveryId, delivery.agentId, agentId, { status: 'assigned' });
+  return moveDeliveryToAgent(deliveryId, delivery.agentId, agentId);
 }
 
 module.exports = {

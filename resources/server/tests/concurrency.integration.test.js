@@ -8,10 +8,10 @@ const { moveDeliveryToAgent } = require('../services/assignmentService');
 
 function createFakeSession() {
   return {
-    startTransaction() {},
-    async commitTransaction() {},
-    async abortTransaction() {},
-    endSession() {}
+    startTransaction() { },
+    async commitTransaction() { },
+    async abortTransaction() { },
+    endSession() { }
   };
 }
 
@@ -61,8 +61,7 @@ test('10 simultaneous assignment operations do not produce duplicate pending ent
     const id = String(deliveryId);
     state.deliveries.set(id, {
       _id: id,
-      agentId: update.$set.agentId,
-      status: update.$set.status
+      agentId: update.$set.agentId
     });
     return state.deliveries.get(id);
   };

@@ -10,9 +10,13 @@ interface AssignmentModalProps {
   drivers: any[];
 }
 
+function isDriverAvailable(driver: any) {
+  return driver.status === 'available';
+}
+
 export function AssignmentModal({ delivery, onClose, onAssign, drivers }: AssignmentModalProps) {
   const [selectedDriver, setSelectedDriver] = useState<string>('');
-  const availableDrivers = drivers.filter(d => d.status === 'available');
+  const availableDrivers = drivers.filter(isDriverAvailable);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -50,7 +54,7 @@ export function AssignmentModal({ delivery, onClose, onAssign, drivers }: Assign
           <h3 className="font-semibold text-gray-900 mb-4">
             Select Available Driver ({availableDrivers.length} available)
           </h3>
-          
+
           {availableDrivers.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-8">No drivers currently available</p>
           ) : (
@@ -58,11 +62,10 @@ export function AssignmentModal({ delivery, onClose, onAssign, drivers }: Assign
               {availableDrivers.map((driver) => (
                 <label
                   key={driver.id}
-                  className={`block cursor-pointer rounded-lg border-2 transition-all ${
-                    selectedDriver === driver.id
+                  className={`block cursor-pointer rounded-lg border-2 transition-all ${selectedDriver === driver.id
                       ? 'border-blue-600 bg-blue-50'
                       : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                    }`}
                 >
                   <input
                     type="radio"

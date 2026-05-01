@@ -5,7 +5,7 @@ const DeliveryAssignment = require('../models/DeliveryAssignment');
 const { buildTravelMatrix, normalizeStop } = require('./matrixCacheService');
 const { buildRoute, routeCost } = require('./routingService');
 
-function isDriverAvailable(agent) {
+function isAvailable(agent) {
   return (agent.activeDeliveries || []).length === 0 && (agent.pendingPickupDeliveries || []).length === 0;
 }
 
@@ -86,7 +86,7 @@ async function scoreAgentForDelivery(agent, deliveryStop, options = {}) {
     }
   );
 
-  const availabilityPenalty = isDriverAvailable(agent) ? 0 : Number(options.busyDriverPenalty ?? 1000);
+  const availabilityPenalty = isAvailable(agent) ? 0 : Number(options.busyDriverPenalty ?? 1000);
 
   return {
     agentId: agent.agentId,
@@ -94,7 +94,7 @@ async function scoreAgentForDelivery(agent, deliveryStop, options = {}) {
     candidateCost,
     marginalCost: marginalCost + availabilityPenalty,
     route,
-    available: isDriverAvailable(agent)
+    available: isAvailable(agent)
   };
 }
 
@@ -111,7 +111,7 @@ async function assignAgent(coords, options = {}) {
     lng: coords.lng
   });
 
-  const preferredAgents = agents.filter(isDriverAvailable);
+  const preferredAgents = agents.filter(isAvailable);
   const candidateAgents = preferredAgents.length > 0 ? preferredAgents : agents;
 
   let bestScore = Infinity;
@@ -153,8 +153,7 @@ async function queueDeliveryToAgent(agentId, deliveryId, options = {}) {
       deliveryId,
       {
         $set: {
-          agentId,
-          status: options.status || 'assigned'
+          agentId
         }
       },
       { new: true, session }
@@ -219,8 +218,7 @@ async function moveDeliveryToAgent(deliveryId, fromAgentId, toAgentId, options =
       deliveryId,
       {
         $set: {
-          agentId: toAgentId,
-          status: 'assigned'
+          agentId: toAgentId
         }
       },
       { new: true, session }
@@ -253,6 +251,6 @@ module.exports = {
   scoreAgentForDelivery,
   queueDeliveryToAgent,
   moveDeliveryToAgent,
-  isDriverAvailable,
+  isDriverAvailable: isAvailable,
   buildAgentRoute
 };
