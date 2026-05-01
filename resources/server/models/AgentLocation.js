@@ -1,4 +1,22 @@
+/**
+ * @fileoverview
+ * AgentLocation Model
+ *
+ * Stores real-time GPS location of agents.
+ *
+ * Responsibilities:
+ * - Track latest known position
+ * - Provide anchor for routing decisions
+ */
+
 const mongoose = require('mongoose');
+
+/**
+ * @typedef {Object} AgentLocation
+ * @property {string} agentId
+ * @property {{lat:number,lng:number}} location
+ * @property {Date} updatedAt
+ */
 
 const agentLocationSchema = new mongoose.Schema({
   agentId: {
@@ -6,12 +24,12 @@ const agentLocationSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  // Live coordinates reported by the mobile app
+
   location: {
     lat: { type: Number, required: true },
     lng: { type: Number, required: true }
   },
-  // Timestamp of the last location update
+
   updatedAt: {
     type: Date,
     default: Date.now

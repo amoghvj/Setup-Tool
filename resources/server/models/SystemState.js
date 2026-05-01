@@ -1,4 +1,22 @@
+/**
+ * @fileoverview
+ * SystemState Model
+ *
+ * Stores global system-level metadata.
+ *
+ * Responsibilities:
+ * - Track first deliveries across all agents
+ * - Maintain global pickup points
+ */
+
 const mongoose = require('mongoose');
+
+/**
+ * @typedef {Object} SystemState
+ * @property {string} configId
+ * @property {ObjectId[]} firstDeliveries
+ * @property {{lat:number,lng:number}[]} pickupPoints
+ */
 
 const systemStateSchema = new mongoose.Schema({
   configId: {
@@ -7,16 +25,17 @@ const systemStateSchema = new mongoose.Schema({
     unique: true,
     default: 'global_optiroute_state'
   },
-  // Global First-Delivery Array: stores only the native _ids of all current immediate next deliveries
+
   firstDeliveries: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'DeliveryAssignment'
   }],
-  // Pickup Point Locations: Static or rarely changing item pickup coordinates
+
   pickupPoints: [{
     lat: { type: Number, required: true },
     lng: { type: Number, required: true }
   }]
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('SystemState', systemStateSchema);
