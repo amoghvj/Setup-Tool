@@ -403,10 +403,171 @@ async function getList(deliveryId) {
     return { before, after };
 }
 
+/**
+ * ============================================
+ * READ PRIMITIVES
+ * ============================================
+ */
+
+/**
+ * Retrieves a single agent by ID.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * INVARIANTS PRESERVED:
+ * - No state mutation
+ *
+ * @async
+ * @param {string} agentId
+ * @returns {Promise<AgentState>}
+ *
+ * @throws {Error} Database failure
+ * @exception {Error} Agent not found
+ */
+async function getAgent(agentId) {
+    const agent = await Agent.findOne({ agentId });
+    if (!agent) throw new Error('Agent not found');
+    return agent;
+}
+
+/**
+ * Retrieves multiple agents.
+ *
+ * @async
+ * @param {Object} [filter]
+ * @returns {Promise<AgentState[]>}
+ */
+async function getAgents(filter = {}) {
+    return Agent.find(filter);
+}
+
+/**
+ * Retrieves a delivery by ID.
+ *
+ * @async
+ * @param {string} deliveryId
+ * @returns {Promise<DeliveryNode>}
+ *
+ * @exception {Error} Delivery not found
+ */
+async function getDelivery(deliveryId) {
+    const delivery = await Delivery.findById(deliveryId);
+    if (!delivery) throw new Error('Delivery not found');
+    return delivery;
+}
+
+/**
+ * Retrieves delivery by external orderId.
+ *
+ * @async
+ * @param {string} orderId
+ * @returns {Promise<DeliveryNode>}
+ *
+ * @exception {Error} Delivery not found
+ */
+async function getDeliveryByOrderId(orderId) {
+    const delivery = await Delivery.findOne({ orderId });
+    if (!delivery) throw new Error('Delivery not found');
+    return delivery;
+}
+
+/**
+ * Retrieves multiple deliveries by IDs.
+ *
+ * @async
+ * @param {string[]} ids
+ * @returns {Promise<DeliveryNode[]>}
+ */
+async function getDeliveriesByIds(ids) {
+    return Delivery.find({ _id: { $in: ids } });
+}
+
+/**
+ * ============================================
+ * AGGREGATION
+ * ============================================
+ */
+
+/**
+ * Retrieves all deliveries committed to an agent (active + pending).
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * INVARIANTS PRESERVED:
+ * - Order preserved from arrays
+ *
+ * @async
+ * @param {string} agentId
+ * @returns {Promise<DeliveryNode[]>}
+ *
+ * @exception {Error} Agent not found
+ */
+async function getAgentCommittedDeliveries(agentId) {
+    const agent = await getAgent(agentId);
+
+    const ids = [
+        ...(agent.activeDeliveries || []),
+        ...(agent.pendingPickupDeliveries || [])
+    ];
+
+    return getDeliveriesByIds(ids);
+}
+
+/**
+ * ============================================
+ * INTEGRITY
+ * ============================================
+ */
+
+/**
+ * Validates that all deliveries belong to the specified agent.
+ *
+ * SYSTEM EFFECTS:
+ * - None (validation only)
+ *
+ * INVARIANTS PRESERVED:
+ * - Prevents cross-agent assignment
+ *
+ * @async
+ * @param {string} agentId
+ * @param {string[]} deliveryIds
+ *
+ * @throws {Error} Database failure
+ * @exception {Error} Ownership mismatch
+ */
+async function validateOwnership(agentId, deliveryIds) {
+    const deliveries = await getDeliveriesByIds(deliveryIds);
+
+    if (deliveries.length !== deliveryIds.length) {
+        throw new Error('Invalid delivery IDs');
+    }
+
+    for (const delivery of deliveries) {
+        if (delivery.agentId !== agentId) {
+            throw new Error('Ownership mismatch detected');
+        }
+    }
+}
+
+/**
+ * ============================================
+ * EXPORTS
+ * ============================================
+ */
+
 module.exports = {
     createDelivery,
     addToPending,
     setActiveRoute,
     unassignDelivery,
-    getList
+    getList,
+    getAgent,
+    getAgents,
+    getDelivery,
+    getDeliveryByOrderId,
+    getDeliveriesByIds,
+    getAgentCommittedDeliveries,
+    validateOwnership
 };
