@@ -21,6 +21,8 @@
 const mongoose = require('mongoose');
 const Agent = require('../models/Agent');
 const Delivery = require('../models/DeliveryAssignment');
+const AgentLocation = require('../models/AgentLocation');
+const PickupLocation = require('../models/PickupLocation');
 
 /**
  * ============================================
@@ -552,6 +554,891 @@ async function validateOwnership(agentId, deliveryIds) {
 }
 
 /**
+ * Removes a delivery from pending queue.
+ *
+ * SYSTEM EFFECTS:
+ * - Removes delivery from pendingPickupDeliveries
+ * - Clears pointer relationships
+ *
+ * INVARIANTS PRESERVED:
+ * - Pointer consistency maintained
+ *
+ * @async
+ * @param {string} agentId
+ * @param {string} deliveryId
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<AgentState>}
+ *
+ * @throws {Error} Agent not found
+ * @throws {Error} Delivery not found
+ */
+async function removeFromPending(
+    agentId,
+    deliveryId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error('Agent not found');
+        }
+
+        const exists =
+            agent.pendingPickupDeliveries.some(
+                id => id.toString() === deliveryId.toString()
+            );
+
+        if (!exists) {
+            throw new Error(
+                'Delivery not in pending queue'
+            );
+        }
+
+        agent.pendingPickupDeliveries =
+            agent.pendingPickupDeliveries.filter(
+                id => id.toString() !== deliveryId.toString()
+            );
+
+        await agent.save({ session });
+
+        await _syncPointersFromArray(
+            agentId,
+            'pending',
+            session
+        );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return agent;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Removes a delivery from active queue.
+ *
+ * SYSTEM EFFECTS:
+ * - Removes delivery from activeDeliveries
+ * - Clears pointer relationships
+ *
+ * INVARIANTS PRESERVED:
+ * - Pointer consistency maintained
+ *
+ * @async
+ * @param {string} agentId
+ * @param {string} deliveryId
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<AgentState>}
+ *
+ * @throws {Error} Agent not found
+ * @throws {Error} Delivery not in active queue
+ */
+async function removeFromActive(
+    agentId,
+    deliveryId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error('Agent not found');
+        }
+
+        const exists =
+            agent.activeDeliveries.some(
+                id => id.toString() === deliveryId.toString()
+            );
+
+        if (!exists) {
+            throw new Error(
+                'Delivery not in active queue'
+            );
+        }
+
+        agent.activeDeliveries =
+            agent.activeDeliveries.filter(
+                id => id.toString() !== deliveryId.toString()
+            );
+
+        await agent.save({ session });
+
+        await _syncPointersFromArray(
+            agentId,
+            'active',
+            session
+        );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return agent;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Deletes an unassigned delivery.
+ *
+ * SYSTEM EFFECTS:
+ * - Permanently removes delivery
+ *
+ * INVARIANTS PRESERVED:
+ * - Assigned deliveries cannot be deleted
+ *
+ * @async
+ * @param {string} deliveryId
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<boolean>}
+ *
+ * @throws {Error} Delivery not found
+ * @throws {Error} Delivery still assigned
+ */
+async function deleteDelivery(
+    deliveryId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const delivery =
+            await Delivery.findById(deliveryId)
+                .session(session);
+
+        if (!delivery) {
+            throw new Error('Delivery not found');
+        }
+
+        if (delivery.agentId) {
+            throw new Error(
+                'Cannot delete assigned delivery'
+            );
+        }
+
+        await Delivery.findByIdAndDelete(
+            deliveryId,
+            { session }
+        );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return true;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Clears pending delivery queue.
+ *
+ * SYSTEM EFFECTS:
+ * - Empties pending queue
+ * - Clears delivery ownership
+ * - Clears pointers
+ *
+ * @async
+ * @param {string} agentId
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<string[]>}
+ *
+ * Array of cleared delivery IDs.
+ */
+async function clearPendingQueue(
+    agentId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error('Agent not found');
+        }
+
+        const ids = [
+            ...agent.pendingPickupDeliveries
+        ];
+
+        await Delivery.updateMany(
+            {
+                _id: { $in: ids }
+            },
+            {
+                $set: {
+                    agentId: null,
+                    prevDeliveryId: null,
+                    nextDeliveryId: null
+                }
+            },
+            { session }
+        );
+
+        agent.pendingPickupDeliveries = [];
+
+        await agent.save({ session });
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return ids;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Replaces the active delivery route.
+ *
+ * SYSTEM EFFECTS:
+ * - Overwrites activeDeliveries
+ * - Rebuilds pointer structure
+ *
+ * @async
+ * @param {string} agentId
+ * @param {string[]} orderedIds
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<AgentState>}
+ */
+async function replaceActiveRoute(
+    agentId,
+    orderedIds,
+    options = {}
+) {
+    return setActiveRoute(
+        agentId,
+        orderedIds,
+        options
+    );
+}
+
+/**
+ * Sets next pickup location.
+ *
+ * SYSTEM EFFECTS:
+ * - Updates agent.nextPickupLocation
+ *
+ * @async
+ * @param {string} agentId
+ * @param {{lat:number,lng:number}} location
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<AgentState>}
+ */
+async function setNextPickupLocation(
+    agentId,
+    location,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error('Agent not found');
+        }
+
+        agent.nextPickupLocation = location;
+
+        await agent.save({ session });
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return agent;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Clears next pickup location.
+ *
+ * SYSTEM EFFECTS:
+ * - Sets nextPickupLocation to null
+ *
+ * @async
+ * @param {string} agentId
+ * @param {SessionOptions} [options]
+ *
+ * @returns {Promise<AgentState>}
+ */
+async function clearNextPickupLocation(
+    agentId,
+    options = {}
+) {
+    return setNextPickupLocation(
+        agentId,
+        null,
+        options
+    );
+}
+
+/**
+ * Retrieves current GPS location of an agent.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * @async
+ * @param {string} agentId
+ *
+ * @returns {Promise<{lat:number,lng:number}|null>}
+ */
+async function getAgentLocation(agentId) {
+    const location =
+        await AgentLocation.findOne({ agentId });
+
+    return location
+        ? location.location
+        : null;
+}
+
+/**
+ * Creates a new delivery agent.
+ *
+ * PROCESS:
+ * 1. Validate uniqueness of external agent identifier.
+ * 2. Create agent document.
+ * 3. Persist new agent.
+ *
+ * SYSTEM EFFECTS:
+ * - Inserts new Agent document into database
+ *
+ * INVARIANTS PRESERVED:
+ * - agentId uniqueness
+ * - empty delivery queues on creation
+ *
+ * @async
+ *
+ * @param {string} agentId
+ * External agent identifier.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<AgentState>}
+ * Newly created agent document.
+ *
+ * @throws {Error}
+ * Thrown if agent already exists.
+ *
+ * @example
+ * const agent =
+ *   await createAgent('driver-101');
+ */
+async function createAgent(
+    agentId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const existing =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (existing) {
+            throw new Error(
+                `Agent "${agentId}" already exists.`
+            );
+        }
+
+        const agent =
+            new Agent({
+                agentId
+            });
+
+        await agent.save({ session });
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return agent;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Retrieves an agent using external agent identifier.
+ *
+ * PROCESS:
+ * 1. Query agent collection.
+ * 2. Validate existence.
+ * 3. Return matching agent.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * @async
+ *
+ * @param {string} agentId
+ * External agent identifier.
+ *
+ * @returns {Promise<AgentState>}
+ * Matching agent document.
+ *
+ * @throws {Error}
+ * Thrown if agent does not exist.
+ *
+ * @example
+ * const agent =
+ *   await getAgentByExternalId('driver-101');
+ */
+async function getAgentByExternalId(agentId) {
+    const agent =
+        await Agent.findOne({ agentId });
+
+    if (!agent) {
+        throw new Error(
+            `Agent "${agentId}" not found.`
+        );
+    }
+
+    return agent;
+}
+
+/**
+ * Creates or updates live agent location.
+ *
+ * PROCESS:
+ * 1. Match existing location document by agentId.
+ * 2. Update coordinates if existing.
+ * 3. Create document if missing.
+ *
+ * SYSTEM EFFECTS:
+ * - Inserts or updates AgentLocation document
+ *
+ * INVARIANTS PRESERVED:
+ * - Single location document per agent
+ *
+ * @async
+ *
+ * @param {string} agentId
+ * External agent identifier.
+ *
+ * @param {{
+ *   lat: number,
+ *   lng: number
+ * }} coords
+ * Current GPS coordinates.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<Object>}
+ * Updated location document.
+ *
+ * @throws {Error}
+ * Thrown if coordinates are invalid.
+ *
+ * @example
+ * await upsertAgentLocation(
+ *   'driver-101',
+ *   { lat: 12.91, lng: 77.59 }
+ * );
+ */
+async function upsertAgentLocation(
+    agentId,
+    coords,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        if (
+            coords?.lat == null ||
+            coords?.lng == null
+        ) {
+            throw new Error(
+                'coords.lat and coords.lng are required.'
+            );
+        }
+
+        const location =
+            await AgentLocation.findOneAndUpdate(
+                {
+                    agentId
+                },
+                {
+                    location: {
+                        lat: coords.lat,
+                        lng: coords.lng
+                    },
+                    updatedAt: Date.now()
+                },
+                {
+                    upsert: true,
+                    new: true,
+                    session
+                }
+            );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return location;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Creates a pickup location.
+ *
+ * PROCESS:
+ * 1. Validate uniqueness of pickup identifier.
+ * 2. Create pickup document.
+ * 3. Persist pickup location.
+ *
+ * SYSTEM EFFECTS:
+ * - Inserts PickupLocation document
+ *
+ * INVARIANTS PRESERVED:
+ * - pickupId uniqueness
+ *
+ * @async
+ *
+ * @param {{
+ *   id: string,
+ *   name: string,
+ *   coords: {
+ *     lat: number,
+ *     lng: number
+ *   }
+ * }} data
+ * Pickup creation payload.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<Object>}
+ * Newly created pickup location.
+ *
+ * @throws {Error}
+ * Thrown if pickup already exists.
+ *
+ * @example
+ * await createPickupLocation({
+ *   id: 'pickup-1',
+ *   name: 'Central Hub',
+ *   coords: {
+ *     lat: 12.91,
+ *     lng: 77.59
+ *   }
+ * });
+ */
+async function createPickupLocation(
+    data,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const existing =
+            await PickupLocation.findOne({
+                pickupId: data.id
+            }).session(session);
+
+        if (existing) {
+            throw new Error(
+                `Pickup location "${data.id}" already exists.`
+            );
+        }
+
+        const pickup =
+            new PickupLocation({
+                pickupId: data.id,
+                name: data.name,
+                location: {
+                    lat: data.coords.lat,
+                    lng: data.coords.lng
+                }
+            });
+
+        await pickup.save({ session });
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return pickup;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Retrieves a pickup location.
+ *
+ * PROCESS:
+ * 1. Query pickup collection.
+ * 2. Validate existence.
+ * 3. Return pickup document.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * @async
+ *
+ * @param {string} pickupId
+ * External pickup identifier.
+ *
+ * @returns {Promise<Object>}
+ * Pickup location document.
+ *
+ * @throws {Error}
+ * Thrown if pickup does not exist.
+ *
+ * @example
+ * const pickup =
+ *   await getPickupLocation('pickup-1');
+ */
+async function getPickupLocation(pickupId) {
+    const pickup =
+        await PickupLocation.findOne({
+            pickupId
+        });
+
+    if (!pickup) {
+        throw new Error(
+            `Pickup location "${pickupId}" not found.`
+        );
+    }
+
+    return pickup;
+}
+
+/**
+ * Deletes a pickup location.
+ *
+ * PROCESS:
+ * 1. Locate pickup by identifier.
+ * 2. Remove pickup document.
+ *
+ * SYSTEM EFFECTS:
+ * - Deletes PickupLocation document
+ *
+ * INVARIANTS PRESERVED:
+ * - No partial deletion state
+ *
+ * @async
+ *
+ * @param {string} pickupId
+ * External pickup identifier.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<Object>}
+ * Deleted pickup document.
+ *
+ * @throws {Error}
+ * Thrown if pickup does not exist.
+ *
+ * @example
+ * await deletePickupLocation('pickup-1');
+ */
+async function deletePickupLocation(
+    pickupId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const deleted =
+            await PickupLocation.findOneAndDelete(
+                { pickupId },
+                { session }
+            );
+
+        if (!deleted) {
+            throw new Error(
+                `Pickup location "${pickupId}" not found.`
+            );
+        }
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return deleted;
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Retrieves pickup locations.
+ *
+ * PROCESS:
+ * 1. Query pickup collection.
+ * 2. Apply optional filters.
+ * 3. Return matching pickups.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * @async
+ *
+ * @param {Object} [filter={}]
+ * Optional mongodb query filter.
+ *
+ * @returns {Promise<Object[]>}
+ * Matching pickup locations.
+ *
+ * @example
+ * const pickups =
+ *   await getPickupLocations();
+ */
+async function getPickupLocations(
+    filter = {}
+) {
+    return PickupLocation.find(filter);
+}
+
+/**
+ * Retrieves deliveries.
+ *
+ * PROCESS:
+ * 1. Query delivery collection.
+ * 2. Apply optional filters.
+ * 3. Return matching deliveries.
+ *
+ * SYSTEM EFFECTS:
+ * - None (read-only)
+ *
+ * @async
+ *
+ * @param {Object} [filter={}]
+ * Optional mongodb query filter.
+ *
+ * @returns {Promise<DeliveryState[]>}
+ * Matching deliveries.
+ *
+ * @example
+ * const deliveries =
+ *   await getDeliveries();
+ */
+async function getDeliveries(
+    filter = {}
+) {
+    return Delivery.find(filter);
+}
+
+/**
  * ============================================
  * EXPORTS
  * ============================================
@@ -569,5 +1456,21 @@ module.exports = {
     getDeliveryByOrderId,
     getDeliveriesByIds,
     getAgentCommittedDeliveries,
-    validateOwnership
+    validateOwnership,
+    removeFromPending,
+    removeFromActive,
+    deleteDelivery,
+    clearPendingQueue,
+    replaceActiveRoute,
+    setNextPickupLocation,
+    clearNextPickupLocation,
+    getAgentLocation,
+    createAgent,
+    getAgentByExternalId,
+    upsertAgentLocation,
+    createPickupLocation,
+    getPickupLocation,
+    deletePickupLocation,
+    getPickupLocations,
+    getDeliveries
 };
