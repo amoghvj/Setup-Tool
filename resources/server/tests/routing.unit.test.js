@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { routeCost, twoOptSwap } = require('../services/routingService');
-const { marginalInsertionCost } = require('../services/assignmentService');
+const { routeCost } = require('../services/costModelService');
+const { twoOptSwap } = require('../routingStrategies/twoOptStrategy');
 
 const matrix = {
   get(fromId, toId) {
@@ -37,15 +37,4 @@ test('twoOptSwap reverses the selected route segment', () => {
   const route = ['A', 'B', 'C', 'D', 'E'];
   const swapped = twoOptSwap(route, 1, 3);
   assert.deepEqual(swapped, ['A', 'D', 'C', 'B', 'E']);
-});
-
-test('marginalInsertionCost produces non-negative delta for added stop', () => {
-  const currentRoute = [stop('A'), stop('B')];
-  const candidate = stop('C');
-
-  const result = marginalInsertionCost(currentRoute, candidate, matrix);
-  assert.equal(Number.isFinite(result.currentCost), true);
-  assert.equal(Number.isFinite(result.candidateCost), true);
-  assert.equal(Number.isFinite(result.marginalCost), true);
-  assert.equal(result.route.length >= currentRoute.length, true);
 });

@@ -23,6 +23,7 @@ const Agent = require('../models/Agent');
 const Delivery = require('../models/DeliveryAssignment');
 const AgentLocation = require('../models/AgentLocation');
 const PickupLocation = require('../models/PickupLocation');
+const SystemState = require('../models/SystemState');
 
 /**
  * ============================================
@@ -1439,6 +1440,316 @@ async function getDeliveries(
 }
 
 /**
+ * Synchronizes global first-delivery tracking.
+ *
+ * Detailed Description:
+ * Queries all agents with active deliveries and updates
+ * the global SystemState document with each agent's
+ * first active delivery ID. This supports frontend
+ * map-level delivery reference rendering.
+ *
+ * PROCESS:
+ * 1. Query all agents with non-empty activeDeliveries.
+ * 2. Extract first delivery ID from each agent.
+ * 3. Upsert global SystemState document.
+ *
+ * SYSTEM EFFECTS:
+ * - Upserts SystemState.firstDeliveries
+ *
+ * INVARIANTS PRESERVED:
+ * - Global first-delivery list reflects current agent state
+ * - Idempotent operation
+ *
+ * TRANSACTION:
+ * - Self-contained (no external session)
+ *
+ * @async
+ *
+ * @returns {Promise<void>}
+ *
+ * @throws {Error}
+ * Database failure.
+ */
+async function syncGlobalFirstDeliveries() {
+    const agents = await Agent.find({
+        'activeDeliveries.0': { $exists: true }
+    });
+
+    const firstDeliveries = agents.map(
+        agent => agent.activeDeliveries[0]
+    );
+
+    await SystemState.findOneAndUpdate(
+        { configId: 'global_optiroute_state' },
+        { $set: { firstDeliveries } },
+        { upsert: true, new: true }
+    );
+}
+
+/**
+ * Completes the first active delivery for an agent.
+ *
+ * Detailed Description:
+ * Atomically removes the first entry from an agent's
+ * activeDeliveries array and deletes the corresponding
+ * delivery document. Used by lifecycle orchestration
+ * to process delivery completions.
+ *
+ * PROCESS:
+ * 1. Validate agent exists.
+ * 2. Validate active queue is non-empty.
+ * 3. Remove first active delivery ID.
+ * 4. Delete delivery document.
+ * 5. Rebuild pointer structure.
+ *
+ * SYSTEM EFFECTS:
+ * - Removes delivery from agent.activeDeliveries
+ * - Deletes DeliveryAssignment document
+ * - Rebuilds active queue pointers
+ *
+ * INVARIANTS PRESERVED:
+ * - Pointer consistency after removal
+ * - Ownership consistency
+ * - Transactional atomicity
+ *
+ * TRANSACTION:
+ * - Owns transaction if session absent
+ * - Reuses provided transaction otherwise
+ *
+ * @async
+ *
+ * @param {string} agentId
+ * External agent identifier.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<{agent: AgentState, completedId: string}>}
+ * Updated agent state and completed delivery ID.
+ *
+ * @throws {Error}
+ * Agent not found.
+ *
+ * @throws {Error}
+ * No active deliveries to complete.
+ *
+ * @example
+ * const { agent, completedId } =
+ *   await completeFirstActive('driver-101');
+ */
+async function completeFirstActive(
+    agentId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error('Agent not found');
+        }
+
+        if (agent.activeDeliveries.length === 0) {
+            throw new Error(
+                'No active deliveries to complete.'
+            );
+        }
+
+        const completedId =
+            agent.activeDeliveries[0];
+
+        agent.activeDeliveries =
+            agent.activeDeliveries.slice(1);
+
+        await agent.save({ session });
+
+        await Delivery.findByIdAndDelete(
+            completedId,
+            { session }
+        );
+
+        await _syncPointersFromArray(
+            agentId,
+            'active',
+            session
+        );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return { agent, completedId };
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
+ * Unassigns and deletes a delivery atomically.
+ *
+ * Detailed Description:
+ * Removes a delivery from whichever agent queue it
+ * belongs to, clears its ownership pointers, and
+ * permanently deletes the delivery document. Used by
+ * lifecycle orchestration for cancellation workflows.
+ *
+ * PROCESS:
+ * 1. Locate delivery by orderId.
+ * 2. Identify owning agent.
+ * 3. Remove from pending or active queue.
+ * 4. Rebuild affected queue pointers.
+ * 5. Delete delivery document.
+ *
+ * SYSTEM EFFECTS:
+ * - Removes delivery from agent queue
+ * - Deletes DeliveryAssignment document
+ * - Rebuilds queue pointers
+ *
+ * INVARIANTS PRESERVED:
+ * - Pointer consistency after removal
+ * - No orphan deliveries
+ * - Transactional atomicity
+ *
+ * TRANSACTION:
+ * - Owns transaction if session absent
+ * - Reuses provided transaction otherwise
+ *
+ * @async
+ *
+ * @param {string} orderId
+ * External order identifier.
+ *
+ * @param {SessionOptions} [options={}]
+ * Optional transaction configuration.
+ *
+ * @returns {Promise<{agent: AgentState, delivery: DeliveryNode, wasActive: boolean, wasFirst: boolean}>}
+ * Cancellation result with queue membership metadata.
+ *
+ * @throws {Error}
+ * Delivery not found.
+ *
+ * @throws {Error}
+ * Agent not found.
+ *
+ * @example
+ * const result =
+ *   await cancelAndDeleteDelivery('ORD-123');
+ */
+async function cancelAndDeleteDelivery(
+    orderId,
+    options = {}
+) {
+    const { session, ownsSession } =
+        await withSession(options.session);
+
+    try {
+        const delivery =
+            await Delivery.findOne({ orderId })
+                .session(session);
+
+        if (!delivery) {
+            throw new Error(
+                `Delivery with orderId "${orderId}" not found.`
+            );
+        }
+
+        const deliveryId = delivery._id;
+        const agentId = delivery.agentId;
+
+        const agent =
+            await Agent.findOne({ agentId })
+                .session(session);
+
+        if (!agent) {
+            throw new Error(
+                `Agent "${agentId}" not found for delivery "${orderId}".`
+            );
+        }
+
+        const inPending =
+            agent.pendingPickupDeliveries.some(
+                id => id.equals(deliveryId)
+            );
+
+        const inActive =
+            agent.activeDeliveries.some(
+                id => id.equals(deliveryId)
+            );
+
+        const wasFirst =
+            inActive &&
+            agent.activeDeliveries.length > 0 &&
+            agent.activeDeliveries[0].equals(deliveryId);
+
+        if (inPending) {
+            agent.pendingPickupDeliveries =
+                agent.pendingPickupDeliveries.filter(
+                    id => !id.equals(deliveryId)
+                );
+
+            await agent.save({ session });
+
+            await _syncPointersFromArray(
+                agentId,
+                'pending',
+                session
+            );
+        } else if (inActive) {
+            agent.activeDeliveries =
+                agent.activeDeliveries.filter(
+                    id => !id.equals(deliveryId)
+                );
+
+            await agent.save({ session });
+
+            await _syncPointersFromArray(
+                agentId,
+                'active',
+                session
+            );
+        }
+
+        await Delivery.findByIdAndDelete(
+            deliveryId,
+            { session }
+        );
+
+        await finalizeSession(
+            session,
+            ownsSession
+        );
+
+        return {
+            agent,
+            delivery,
+            wasActive: inActive,
+            wasFirst
+        };
+
+    } catch (err) {
+        await finalizeSession(
+            session,
+            ownsSession,
+            err
+        );
+
+        throw err;
+    }
+}
+
+/**
  * ============================================
  * EXPORTS
  * ============================================
@@ -1472,5 +1783,9 @@ module.exports = {
     getPickupLocation,
     deletePickupLocation,
     getPickupLocations,
-    getDeliveries
+    getDeliveries,
+    syncGlobalFirstDeliveries,
+    completeFirstActive,
+    cancelAndDeleteDelivery
 };
+

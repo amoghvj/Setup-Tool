@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildTravelMatrix } = require('../services/matrixCacheService');
-const { buildRoute, twoOpt, routeCost } = require('../services/routingService');
+const { buildRoute, optimizeRoute } = require('../services/routingEngineService');
+const { routeCost } = require('../services/costModelService');
 
 function createStops(count) {
   const anchor = { id: 'depot', lat: 40.7128, lng: -74.0060 };
@@ -26,7 +27,7 @@ test('20-stop optimization has cost <= insertion-only route cost', async () => {
   const insertionRoute = buildRoute(stops, matrix);
   const insertionCost = routeCost(insertionRoute, matrix);
 
-  const optimized = twoOpt(insertionRoute, matrix);
+  const optimized = optimizeRoute(insertionRoute, matrix);
   const optimizedCost = routeCost(optimized, matrix);
 
   assert.equal(optimized.length, insertionRoute.length);
