@@ -23,9 +23,9 @@
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    server.js (API Layer)               │
-│  Routes → deliveryService / assignmentService          │
-│           stateService (read-only queries)              │
+│                    server.js (API Layer)             │
+│  Routes → deliveryService / assignmentService        │
+│           stateService (read-only queries)           │
 └──────┬─────────────┬─────────────┬───────────────────┘
        │             │             │
        ▼             ▼             ▼
@@ -35,12 +35,12 @@
 │ (lifecycle │ │ (agent    │ │ - queue ops        │
 │  orchestr.)│ │  scoring) │ │ - pointer sync     │
 └─────┬──────┘ └─────┬─────┘ │ - delivery CRUD   │
-      │               │       │ - agent CRUD       │
-      │               │       │ - location ops     │
-      ▼               ▼       │ - global sync      │
-┌──────────────────────┐      └────────┬────────────┘
-│ routingEngineService │               │
-│ (routing orchestr.)  │               ▼
+      │              │       │ - agent CRUD       │
+      │              │       │ - location ops     │
+      ▼              ▼       │ - global sync      │
+┌──────────────────────┐     └────────┬────────────┘
+│ routingEngineService │              │
+│ (routing orchestr.)  │              ▼
 │ - strategy selection │        ┌──────────────┐
 │ - route evaluation   │        │  MongoDB     │
 │ - marginal cost      │        │  (Mongoose)  │
