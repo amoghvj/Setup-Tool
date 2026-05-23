@@ -28,19 +28,19 @@ from tkinter import filedialog, messagebox
 # ---------------------------------------------------------------------------
 
 def get_app_root() -> str:
-    """Return the application root directory.
-
-    • Frozen (PyInstaller --onefile): Uses the TEMP extraction dir (_MEIPASS)
-      for bundled data, but we prefer the *exe's own directory* so that
-      the simulated-install layout (resources/ beside the exe) works.
-    • Development: Two levels up from src/main.py → project root.
+    """Return the application runtime root directory.
+    
+    • Frozen (PyInstaller exe): Uses the exe's own directory as the runtime root.
+    • Development: Uses the runtime-dev/ directory as the effective runtime root,
+      ensuring execution isolates from the raw repository source.
     """
     if getattr(sys, 'frozen', False):
-        # Running as compiled exe — resources sit next to the exe
+        # Running as compiled exe — runtime root is the exe directory
         return os.path.dirname(sys.executable)
     else:
-        # Running from source — project root is parent of src/
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Running from source — runtime root is the simulated runtime-dev/ directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(project_root, 'runtime-dev')
 
 
 def get_resource_path(*parts) -> str:

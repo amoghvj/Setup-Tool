@@ -87,17 +87,6 @@ const {
 } = require('./services/stateService');
 
 // ============================================
-// STATIC FRONTEND
-// ============================================
-
-app.use(
-  '/manager',
-  express.static(
-    path.join(__dirname, 'frontend/dist')
-  )
-);
-
-// ============================================
 // AGENT ENDPOINTS
 // ============================================
 
@@ -514,39 +503,6 @@ app.get('/api/pickups', async (_req, res) => {
       error: err.message
     });
   }
-});
-
-// ============================================
-// SPA FALLBACK
-// ============================================
-
-app.get('/manager/*', (req, res) => {
-  if (
-    req.path.startsWith(
-      '/manager/assets/'
-    )
-  ) {
-    return res
-      .status(404)
-      .send('Asset not found');
-  }
-
-  res.setHeader(
-    'Cache-Control',
-    'no-cache, no-store, must-revalidate'
-  );
-
-  return res.sendFile(
-    path.join(
-      __dirname,
-      'frontend/dist',
-      'index.html'
-    )
-  );
-});
-
-app.get('/manager', (_req, res) => {
-  return res.redirect('/manager/');
 });
 
 // ============================================

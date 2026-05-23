@@ -7,8 +7,12 @@ node_modules/
 # Build artifacts
 build/
 dist/
-!resources/server/frontend/dist/
+!resources/frontend/dist/
+!installed/SetupTool/resources/frontend/dist/
 *.spec
+
+# Runtime-dev staging (auto-generated)
+runtime-dev/
 
 # OS files
 .DS_Store
